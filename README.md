@@ -1,4 +1,4 @@
-# Ageis Smart Cycle Lock
+# Aegis Smart Cycle Lock
 Aegis is a heavy-duty, open-source, distributed smart bicycle lock. Unlike standard commercial locks, Aegis uses a split-node architecture to physically separate the user interface from the vulnerable locking mechanism, making it highly resistant to tampering and brute-force attacks.
 
 🏗️ System Architecture
