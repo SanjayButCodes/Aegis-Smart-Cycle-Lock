@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aegis Smart Lock - Circuit Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #f8fafc;
+            --panel-bg: #ffffff;
+            --text-main: #1e293b;
+            --text-muted: #64748b;
+            
+            --wire-idle: #94a3b8;
+            --wire-power: #ef4444;
+            --wire-data: #3b82f6;
+            --wire-switch: #10b981;
+            --wire-alarm: #f97316;
+            --wire-gnd: #475569;
+            --wire-wake: #eab308;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* SVG Wire Styles & Animations */
+        .wire {
+            stroke: var(--wire-idle);
+            stroke-width: 2.5;
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            transition: all 0.3s ease;
+        }
+        .wire-thick { stroke-width: 4; }
+
+        @keyframes flow-fwd { to { stroke-dashoffset: -20; } }
+        @keyframes flow-rev { to { stroke-dashoffset: 20; } }
+
+        .active-power { stroke: var(--wire-power); stroke-dasharray: 8 6; animation: flow-fwd 0.5s linear infinite; }
+        .active-gnd { stroke: var(--wire-gnd); stroke-dasharray: 8 6; animation: flow-fwd 0.8s linear infinite; }
+        .active-data-tx { stroke: var(--wire-data); stroke-dasharray: 6 6; animation: flow-fwd 0.6s linear infinite; }
+        .active-data-rx { stroke: var(--wire-data); stroke-dasharray: 6 6; animation: flow-rev 0.6s linear infinite; }
+        .active-switch { stroke: var(--wire-switch); stroke-dasharray: 6 4; animation: flow-rev 0.4s linear infinite; }
+        .active-wake { stroke: var(--wire-wake); stroke-dasharray: 8 4; animation: flow-fwd 0.3s linear infinite; filter: drop-shadow(0 0 3px rgba(234, 179, 8, 0.6)); }
+        .active-alarm { stroke: var(--wire-alarm); stroke-dasharray: 10 5; stroke-width: 4; animation: flow-fwd 0.3s linear infinite; filter: drop-shadow(0 0 4px rgba(249, 115, 22, 0.6)); }
+        
+        .deadman-cut { stroke: var(--wire-power); stroke-dasharray: 2 12; animation: flash-cut 0.5s ease-in-out infinite; }
+        @keyframes flash-cut { 0%, 100% { opacity: 0.2; } 50% { opacity: 1; filter: drop-shadow(0 0 4px red); } }
+
+        /* Component Styles */
+        .module-box { fill: #ffffff; stroke: #cbd5e1; stroke-width: 2; rx: 12; filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.05)); }
+        .module-title { fill: #475569; font-size: 16px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
+        
+        .chip { fill: #f8fafc; stroke: #94a3b8; stroke-width: 2; rx: 6; }
+        .chip-label { fill: #1e293b; font-size: 14px; font-weight: 700; text-anchor: middle; dominant-baseline: middle; }
+        .chip-sub { fill: #64748b; font-size: 10px; text-anchor: middle; font-family: 'JetBrains Mono', monospace; }
+        .pin { fill: #94a3b8; }
+
+        /* Interactive Components */
+        .interactive-comp { cursor: pointer; transition: all 0.2s; }
+        .interactive-comp:hover .chip, .interactive-comp:hover .hover-target { stroke: #3b82f6; stroke-width: 3; filter: drop-shadow(0 0 6px rgba(59, 130, 246, 0.3)); }
+        
+        /* Animations */
+        @keyframes spin-cw { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes spin-ccw { from { transform: rotate(0deg); } to { transform: rotate(-360deg); } }
+        .motor-fwd { transform-origin: 1030px 170px; animation: spin-cw 1s linear infinite; }
+        .motor-rev { transform-origin: 1030px 170px; animation: spin-ccw 1s linear infinite; }
+
+        @keyframes siren-pulse { 0% { r: 25; fill: rgba(239, 68, 68, 0.1); opacity: 1; } 100% { r: 70; fill: rgba(239, 68, 68, 0.8); opacity: 0; } }
+        .siren-ring { transform-origin: 1080px 420px; fill: none; stroke: #ef4444; stroke-width: 2; opacity: 0; }
+        .siren-active .siren-ring { animation: siren-pulse 1s ease-out infinite; }
+        .siren-active .siren-ring:nth-child(2) { animation-delay: 0.3s; }
+        .siren-active .siren-ring:nth-child(3) { animation-delay: 0.6s; }
+        
+        @keyframes bg-alarm-pulse { 0%, 100% { fill: #ffffff; } 50% { fill: #fee2e2; } }
+        .alarm-bg { animation: bg-alarm-pulse 0.8s infinite; }
+        
+        @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+        .shake-warning { animation: shake 0.3s ease-in-out 2; }
+
+        /* Custom Scrollbar & Code Formatting */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        input[type=range] { accent-color: #ef4444; }
+        
+        pre { font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.5; margin: 0; }
+        .token-keyword { color: #c678dd; }
+        .token-function { color: #61afef; }
+        .token-string { color: #98c379; }
+        .token-comment { color: #7f848e; font-style: italic; }
+        .token-number { color: #d19a66; }
+        .token-include { color: #e06c75; }
+    </style>
+</head>
+<body>
+
+    <!-- LEFT SIDE: SVG DIAGRAM -->
+    <div class="flex-1 bg-[#f8fafc] relative overflow-hidden flex items-center justify-center p-4 h-full z-0">
+        <svg id="circuit-svg" viewBox="0 0 1300 800" class="w-full h-full drop-shadow-xl" preserveAspectRatio="xMidYMid meet">
+            
+            <!-- MODULE BACKGROUNDS -->
+            <rect x="20" y="40" width="220" height="320" class="module-box" />
+            <text x="130" y="70" class="module-title" text-anchor="middle">POWER SLED</text>
+            
+            <rect x="20" y="420" width="220" height="340" class="module-box" />
+            <text x="130" y="450" class="module-title" text-anchor="middle">HANDLEBAR (UI)</text>
+
+            <rect id="vault-box" x="480" y="40" width="780" height="540" class="module-box transition-colors duration-500" />
+            <text x="870" y="70" class="module-title" text-anchor="middle">REAR HUB (THE VAULT)</text>
+
+            <!-- HARNESS INTERCONNECT -->
+            <g class="interactive-comp" onclick="showInfo('harness')">
+                <rect x="260" y="470" width="200" height="210" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="4 4" rx="8" class="hover-target" />
+                <text x="360" y="495" class="chip-sub" font-size="12" font-weight="bold">8-Wire Cat5e Harness</text>
+                
+                <path id="h-5v" d="M 240 520 L 480 520" class="wire" stroke="#ef4444" />
+                <path id="h-gnd" d="M 240 540 L 480 540" class="wire" stroke="#475569" />
+                <path id="h-tx" d="M 240 560 L 480 560" class="wire" stroke="#3b82f6" />
+                <path id="h-rx" d="M 240 580 L 480 580" class="wire" stroke="#3b82f6" />
+                <path id="h-wake" d="M 240 600 L 480 600" class="wire" stroke="#eab308" />
+                <path id="h-dm1" d="M 240 620 L 480 620" class="wire" stroke="#a855f7" />
+                <path id="h-dm2" d="M 240 640 L 480 640" class="wire" stroke="#a855f7" />
+                <path d="M 240 660 L 480 660" class="wire" stroke="#94a3b8" stroke-dasharray="4 4" />
+                <rect x="260" y="470" width="200" height="210" fill="transparent" />
+            </g>
+
+            <!-- WIRES (Static & Animated) -->
+            <!-- Power Routing -->
+            <path id="w-batt-tp" d="M 130 150 L 130 170" class="wire wire-thick" stroke="#ef4444" />
+            <path id="w-tp-boost" d="M 130 220 L 130 235 L 80 235 L 80 250 M 130 235 L 180 235 L 180 250" class="wire wire-thick" stroke="#ef4444" />
+            <path id="w-12v" d="M 80 320 L 80 380 L 250 380 L 250 80 L 870 80 L 870 130" class="wire wire-thick active-power" />
+            <path id="w-12v-siren" d="M 870 80 L 1080 80 L 1080 370" class="wire wire-thick active-power" />
+            <path id="w-5v-split" d="M 180 320 L 180 520 L 240 520 M 180 360 L 240 360 L 240 100 L 610 100 L 610 170" class="wire active-power" />
+
+            <!-- UI Internal -->
+            <path id="w-tx-ui" d="M 80 480 L 80 560 L 240 560" class="wire" />
+            <path id="w-rx-ui" d="M 100 480 L 100 580 L 240 580" class="wire" />
+            <path id="w-btn-nano" d="M 90 710 L 90 600 L 120 600 L 120 540" class="wire" />
+            <path id="w-btn-harness" d="M 90 600 L 240 600" class="wire" />
+            <path id="w-dm-loop" d="M 240 620 L 110 620 L 110 640 L 240 640" class="wire" stroke="#a855f7" />
+
+            <!-- Vault Internal Routing -->
+            <path id="w-rx-esp" d="M 480 560 L 590 560 L 590 360" class="wire" /> 
+            <path id="w-tx-esp" d="M 480 580 L 610 580 L 610 360" class="wire" /> 
+            <path id="w-wake-esp" d="M 480 600 L 670 600 L 670 360" class="wire" />
+            <path id="w-dm-esp-out" d="M 480 620 L 710 620 L 710 360" class="wire" stroke="#a855f7" />
+            <path id="w-dm-esp-in" d="M 480 640 L 730 640 L 730 360" class="wire" stroke="#a855f7" />
+            
+            <!-- Motor Logic -->
+            <path id="w-logic-dir1" d="M 750 200 L 850 200" class="wire" />
+            <path id="w-logic-dir2" d="M 750 220 L 850 220" class="wire" />
+            <path id="w-logic-pwm" d="M 750 240 L 850 240" class="wire" />
+            <path id="w-mot-m1" d="M 970 200 L 1010 200" class="wire wire-thick"/>
+            <path id="w-mot-m2" d="M 970 220 L 1010 220" class="wire wire-thick"/>
+            <path id="w-sw-lock" d="M 930 300 L 750 300" class="wire" />
+            <path id="w-sw-unlock" d="M 930 360 L 800 360 L 800 320 L 750 320" class="wire" />
+
+            <!-- MPU Logic -->
+            <path id="w-mpu-sda" d="M 640 450 L 640 360" class="wire" />
+            <path id="w-mpu-scl" d="M 660 450 L 660 360" class="wire" />
+            <path id="w-mpu-int" d="M 680 450 L 680 360" class="wire" />
+            <path id="w-alarm-trig" d="M 750 340 L 1060 340 L 1060 400" class="wire" />
+
+            <!-- INTERACTIVE COMPONENTS -->
+
+            <!-- POWER SLED -->
+            <g class="interactive-comp" transform="translate(80, 90)" onclick="showInfo('power')">
+                <rect x="10" y="0" width="80" height="60" class="chip hover-target" fill="#cbd5e1" stroke="#64748b" stroke-width="2" rx="4" />
+                <rect x="5" y="15" width="5" height="30" fill="#94a3b8" />
+                <rect x="90" y="15" width="5" height="30" fill="#94a3b8" />
+                <text x="50" y="30" class="chip-label" font-size="12">18650 Cell</text>
+                
+                <rect x="20" y="80" width="60" height="50" class="chip" stroke="#3b82f6" />
+                <text x="50" y="100" class="chip-label" font-size="10">TP4056</text>
+                
+                <rect x="-30" y="160" width="60" height="70" class="chip" stroke="#ef4444" />
+                <circle cx="-15" cy="185" r="10" fill="#f59e0b" />
+                <text x="0" y="210" class="chip-label" font-size="10">MT3608</text>
+                <text x="0" y="222" class="chip-sub" fill="#ef4444">12V OUT</text>
+                
+                <rect x="70" y="160" width="60" height="70" class="chip" stroke="#ef4444" />
+                <circle cx="85" cy="185" r="10" fill="#f59e0b" />
+                <text x="100" y="210" class="chip-label" font-size="10">MT3608</text>
+                <text x="100" y="222" class="chip-sub" fill="#ef4444">5V OUT</text>
+                <rect x="-40" y="-10" width="180" height="250" fill="transparent"/>
+            </g>
+
+            <!-- HANDLEBAR UI -->
+            <g transform="translate(60, 480)">
+                <!-- Arduino Nano -->
+                <g class="interactive-comp" onclick="showInfo('nano')">
+                    <rect x="0" y="0" width="140" height="60" class="chip" fill="#e0f2fe" stroke="#0ea5e9" />
+                    <text x="70" y="30" class="chip-label">Arduino Nano</text>
+                    <rect x="15" y="-5" width="10" height="5" class="pin"/><text x="20" y="-12" class="chip-sub">TX</text>
+                    <rect x="35" y="-5" width="10" height="5" class="pin"/><text x="40" y="-12" class="chip-sub">RX</text>
+                    <rect x="55" y="-5" width="10" height="5" class="pin"/><text x="60" y="-12" class="chip-sub">D2</text>
+                    <rect x="-10" y="-20" width="160" height="100" fill="transparent"/>
+                </g>
+
+                <!-- PN532 NFC -->
+                <g class="interactive-comp" onclick="showInfo('nfc')">
+                    <rect x="-10" y="100" width="80" height="60" class="chip" fill="#fee2e2" stroke="#f87171" stroke-width="2" rx="6" />
+                    <path d="M 0 120 Q 30 100 60 120 Q 30 140 0 120" fill="none" stroke="#fca5a5" stroke-width="2"/>
+                    <path d="M 10 130 Q 30 115 50 130 Q 30 145 10 130" fill="none" stroke="#fca5a5" stroke-width="2"/>
+                    <text x="30" y="150" class="chip-label" font-size="10">PN532 NFC</text>
+                    <rect x="-20" y="90" width="100" height="80" fill="transparent"/>
+                </g>
+                
+                <!-- RGB LED -->
+                <g class="interactive-comp" onclick="showInfo('led')">
+                    <circle id="ui-led" cx="110" cy="130" r="16" fill="#cbd5e1" stroke="#94a3b8" stroke-width="2" class="chip transition-colors duration-500" />
+                    <text x="110" y="160" class="chip-sub">RGB LED</text>
+                    <rect x="80" y="110" width="60" height="60" fill="transparent"/>
+                </g>
+
+                <!-- Physical Lock Button -->
+                <g class="interactive-comp" onclick="showInfo('btn')">
+                    <rect x="10" y="230" width="40" height="40" class="chip" fill="#f1f5f9" stroke="#94a3b8" stroke-width="2" rx="4" />
+                    <circle id="physical-btn-svg" cx="30" cy="250" r="12" fill="#ef4444" stroke="#b91c1c" stroke-width="2" class="transition-all duration-100" />
+                    <text x="30" y="285" class="chip-label" font-size="10">LOCK BTN</text>
+                    <rect x="0" y="220" width="60" height="80" fill="transparent"/>
+                </g>
+            </g>
+
+            <!-- VAULT COMPONENTS -->
+            <!-- ESP32 Core -->
+            <g class="interactive-comp" transform="translate(580, 170)" onclick="showInfo('esp32')">
+                <rect x="0" y="0" width="170" height="190" class="chip" fill="#1e293b" stroke="#0f172a" />
+                <path d="M 40 10 L 130 10 L 130 30 L 110 30 L 110 20 L 60 20 L 60 30 L 40 30 Z" fill="#cbd5e1" />
+                <text x="85" y="95" class="chip-label" fill="#f8fafc">ESP32 Core</text>
+                <text x="85" y="115" class="chip-sub" fill="#94a3b8">The Vault Brain</text>
+                
+                <rect x="25" y="-5" width="10" height="5" class="pin"/><text x="30" y="-12" class="chip-sub">5V IN</text>
+                <rect x="5" y="190" width="10" height="5" class="pin"/><text x="10" y="205" class="chip-sub">RX2</text>
+                <rect x="25" y="190" width="10" height="5" class="pin"/><text x="30" y="205" class="chip-sub">TX2</text>
+                <rect x="55" y="190" width="8" height="5" class="pin"/><text x="59" y="205" class="chip-sub">SDA</text>
+                <rect x="75" y="190" width="8" height="5" class="pin"/><text x="79" y="205" class="chip-sub">SCL</text>
+                <rect x="95" y="190" width="8" height="5" class="pin"/><text x="99" y="205" class="chip-sub">INT</text>
+                <rect x="125" y="190" width="10" height="5" class="pin"/><text x="130" y="205" class="chip-sub">3V3</text>
+                <rect x="145" y="190" width="10" height="5" class="pin"/><text x="150" y="205" class="chip-sub">D14</text>
+                
+                <rect x="170" y="25" width="5" height="10" class="pin"/><text x="180" y="30" class="chip-sub" text-anchor="start">D25</text>
+                <rect x="170" y="45" width="5" height="10" class="pin"/><text x="180" y="50" class="chip-sub" text-anchor="start">D26</text>
+                <rect x="170" y="65" width="5" height="10" class="pin"/><text x="180" y="70" class="chip-sub" text-anchor="start">D27</text>
+                <rect x="170" y="125" width="5" height="10" class="pin"/><text x="180" y="130" class="chip-sub" text-anchor="start">D32</text>
+                <rect x="170" y="145" width="5" height="10" class="pin"/><text x="180" y="150" class="chip-sub" text-anchor="start">D33</text>
+                <rect x="170" y="165" width="5" height="10" class="pin"/><text x="180" y="170" class="chip-sub" text-anchor="start">D4</text>
+                <rect x="-10" y="-10" width="220" height="230" fill="transparent"/>
+            </g>
+
+            <!-- MPU6050 Accelerometer -->
+            <g class="interactive-comp" transform="translate(620, 450)" onclick="showInfo('mpu6050')">
+                <rect x="0" y="0" width="80" height="60" class="chip" fill="#eff6ff" stroke="#3b82f6" />
+                <rect x="25" y="15" width="30" height="20" fill="#1e3a8a" rx="2"/>
+                <text x="40" y="50" class="chip-label" font-size="12">MPU6050</text>
+                <rect x="-10" y="-10" width="100" height="80" fill="transparent"/>
+            </g>
+
+            <!-- TB6612FNG Driver -->
+            <g class="interactive-comp" transform="translate(850, 160)" onclick="showInfo('driver')">
+                <rect x="0" y="0" width="120" height="100" class="chip" fill="#ecfdf5" stroke="#10b981" />
+                <text x="60" y="50" class="chip-label" font-size="12">TB6612FNG</text>
+                <rect x="-10" y="-10" width="140" height="120" fill="transparent"/>
+            </g>
+
+            <!-- JGY370 Motor & Switches -->
+            <g class="interactive-comp" transform="translate(930, 150)" onclick="showInfo('motor')">
+                <g transform="translate(0, 140)">
+                    <rect x="0" y="0" width="50" height="25" fill="#f1f5f9" stroke="#94a3b8" stroke-width="2" rx="2" class="hover-target" />
+                    <path id="lever-lock" d="M 5 5 L 45 -5" stroke="#94a3b8" stroke-width="2" fill="none" class="transition-all duration-200" />
+                    <circle id="roller-lock" cx="45" cy="-5" r="4" fill="#ef4444" class="transition-all duration-200" />
+                    <text x="25" y="16" class="chip-sub" font-size="9">LOCK LMT</text>
+                </g>
+                <g transform="translate(0, 200)">
+                    <rect x="0" y="0" width="50" height="25" fill="#f1f5f9" stroke="#94a3b8" stroke-width="2" rx="2" class="hover-target" />
+                    <path id="lever-unlock" d="M 5 5 L 45 -5" stroke="#94a3b8" stroke-width="2" fill="none" class="transition-all duration-200" />
+                    <circle id="roller-unlock" cx="45" cy="-5" r="4" fill="#22c55e" class="transition-all duration-200" />
+                    <text x="25" y="16" class="chip-sub" font-size="9">UNLCK LMT</text>
+                </g>
+                <g transform="translate(80, 0)">
+                    <rect x="20" y="0" width="80" height="50" class="chip hover-target" fill="#e2e8f0" stroke="#94a3b8" stroke-width="3" rx="8" />
+                    <text x="60" y="30" class="chip-sub" font-size="12" font-weight="700">DC Motor</text>
+                    <rect x="20" y="60" width="60" height="80" class="chip hover-target" fill="#cbd5e1" stroke="#94a3b8" stroke-width="3" rx="4" />
+                    <g id="motor-shaft">
+                        <circle cx="50" cy="50" r="18" fill="#f8fafc" stroke="#475569" stroke-width="3" />
+                        <line x1="50" y1="32" x2="50" y2="68" stroke="#ef4444" stroke-width="5" stroke-linecap="round" />
+                    </g>
+                </g>
+                <rect x="-10" y="-10" width="200" height="250" fill="transparent"/>
+            </g>
+
+            <!-- Alarm / Siren -->
+            <g class="interactive-comp" transform="translate(1020, 400)" onclick="showInfo('siren')">
+                <g id="siren-rings">
+                    <circle cx="60" cy="20" r="25" class="siren-ring" />
+                    <circle cx="60" cy="20" r="25" class="siren-ring" />
+                    <circle cx="60" cy="20" r="25" class="siren-ring" />
+                </g>
+                <circle cx="60" cy="20" r="30" class="chip hover-target" fill="#1e293b" stroke="#ef4444" stroke-width="4" />
+                <text x="60" y="65" class="chip-label" fill="#ef4444">110dB SIREN</text>
+                <text id="lbl-alarm" x="60" y="24" class="chip-label" fill="#ef4444" font-size="12" style="opacity:0">ALARM!</text>
+                <rect x="-10" y="-20" width="120" height="100" fill="transparent"/>
+            </g>
+        </svg>
+    </div>
+
+    <!-- RIGHT SIDE: DASHBOARD (Controls + Info Panel) -->
+    <div class="w-[440px] bg-white border-l border-slate-200 flex flex-col z-10 shadow-[-4px_0_15px_rgba(0,0,0,0.03)] h-full overflow-hidden shrink-0">
+        
+        <!-- Status Header -->
+        <div class="p-4 border-b border-slate-200 bg-slate-50 flex flex-col gap-2 shrink-0">
+            <h1 class="text-lg font-bold text-slate-800 tracking-tight">Aegis Interactive Dash</h1>
+            <span id="status-indicator" class="px-4 py-2 rounded font-bold bg-slate-800 text-white border border-slate-900 shadow-sm transition-colors duration-300 tracking-wider text-center text-sm w-full">
+                LOCKED & ARMED
+            </span>
+        </div>
+
+        <!-- Scrollable Middle Section -->
+        <div class="flex-1 overflow-y-auto flex flex-col">
+            
+            <!-- Controls Section -->
+            <div class="p-4 flex flex-col gap-4 border-b border-slate-200">
+                <!-- Action Buttons -->
+                <div class="grid grid-cols-2 gap-3">
+                    <button id="btn-unlock" class="bg-white border border-slate-300 hover:border-blue-400 hover:bg-blue-50 text-slate-700 font-semibold py-2 px-3 rounded shadow-sm transition-all flex flex-col items-center justify-center gap-1 text-xs">
+                        NFC Unlock
+                    </button>
+                    <button id="btn-lock" class="bg-white border border-slate-300 hover:border-slate-400 hover:bg-slate-100 text-slate-700 font-semibold py-2 px-3 rounded shadow-sm transition-all flex flex-col items-center justify-center gap-1 text-xs">
+                        Phys. Lock Btn
+                    </button>
+                </div>
+
+                <!-- Accelerometer Slider -->
+                <div class="bg-slate-50 border border-slate-200 p-3 rounded shadow-inner">
+                    <div class="flex justify-between items-center mb-2">
+                        <label class="text-xs text-slate-600 font-bold">MPU6050 Accelerometer</label>
+                        <span id="g-force-val" class="font-mono text-xs font-bold text-slate-700 bg-slate-200 px-2 py-0.5 rounded">1.0 G (Idle)</span>
+                    </div>
+                    <input type="range" id="accel-slider" min="1.0" max="5.0" step="0.1" value="1.0" class="w-full cursor-pointer mt-1 mb-1">
+                    <div class="flex justify-between text-[9px] text-slate-400 font-mono font-bold">
+                        <span>1.0G</span>
+                        <span class="text-yellow-600">>2.0G (Motion)</span>
+                        <span class="text-red-500">>=2.5G (Tamper)</span>
+                    </div>
+                </div>
+
+                <!-- Sabotage Buttons -->
+                <button id="btn-cut" class="w-full bg-white border border-red-200 hover:bg-red-50 hover:border-red-400 text-red-600 font-bold py-2 px-4 rounded shadow-sm transition-all text-xs flex items-center justify-center gap-2">
+                    Sever Cat5e Cable (Dead-Man)
+                </button>
+                <button id="btn-reset" class="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-2 px-4 rounded shadow-md transition-all text-xs hidden">
+                    System Reboot & Repair
+                </button>
+            </div>
+
+            <!-- Information Panel (Dynamic) -->
+            <div id="info-panel" class="flex-1 flex flex-col min-h-[300px] overflow-hidden">
+                <div class="flex flex-col items-center justify-center h-full text-slate-400 text-center p-6" id="info-default">
+                    <p class="text-sm font-medium">Click on any component in the circuit diagram to view its details and firmware source code.</p>
+                </div>
+                
+                <div id="info-content" class="hidden flex-col h-full">
+                    <div class="p-4 pb-2 border-b border-slate-100 shrink-0 bg-white">
+                        <h2 id="info-title" class="text-base font-bold text-slate-800">Component Name</h2>
+                        <p id="info-desc" class="text-xs text-slate-600 mt-1 leading-relaxed"></p>
+                    </div>
+                    
+                    <!-- Scrollable Code Container -->
+                    <div id="info-code-container" class="hidden flex-col flex-1 min-h-0 bg-[#1e1e1e]">
+                        <div class="bg-[#2d2d2d] text-slate-400 text-[10px] px-3 py-1 font-bold tracking-wider uppercase border-b border-[#3d3d3d] shrink-0">
+                            Firmware Source (.cpp / .ino)
+                        </div>
+                        <!-- MUST set overflow-auto here for inner scrolling -->
+                        <div class="flex-1 overflow-auto p-4">
+                            <pre><code id="info-code" class="text-slate-300"></code></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Serial Log (Fixed Bottom) -->
+        <div class="h-32 bg-slate-900 flex flex-col font-mono text-xs shadow-inner shrink-0">
+            <div class="bg-slate-800 text-slate-300 py-1.5 px-3 flex justify-between border-b border-slate-700 font-semibold text-[10px]">
+                <span>COM3 - Terminal</span>
+                <span>115200 baud</span>
+            </div>
+            <div id="terminal" class="flex-1 p-2 overflow-y-auto text-green-400 whitespace-pre-wrap flex flex-col gap-1 text-[11px]">
+                <div>> SYSTEM READY</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- APPLICATION LOGIC & DATA -->
+    <script>
+        // Exact C++ Code Data Dictionary
+        const componentData = {
+            'esp32': {
+                title: 'ESP32 Development Core (Vault)',
+                desc: 'Master logic controller. Handles motion lockout, limit switches, and dead-man interrupts.',
+                code: `#include <Wire.h>
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
+Adafruit_MPU6050 mpu;
+#define AIN1 25
+#define AIN2 26
+#define PWMA 27
+#define SW_UNLOCK 32
+#define SW_LOCK 33
+#define SIREN_PIN 4
+#define DEADMAN_PIN 14 
+#define WAKE_BTN 35    
+#define RX_NANO 16
+#define TX_NANO 17
+#define MOTION_THRESHOLD 2.0 
+void setup() { Serial.begin(115200); Serial2.begin(9600, SERIAL_8N1, RX_NANO, TX_NANO); pinMode(AIN1, OUTPUT); pinMode(AIN2, OUTPUT); pinMode(PWMA, OUTPUT); pinMode(SIREN_PIN, OUTPUT); pinMode(SW_UNLOCK, INPUT_PULLUP); pinMode(SW_LOCK, INPUT_PULLUP); pinMode(DEADMAN_PIN, INPUT); pinMode(WAKE_BTN, INPUT); stopMotor(); digitalWrite(SIREN_PIN, LOW); if (!mpu.begin()) { Serial.println("Failed to find MPU6050"); } else { mpu.setHighPassFilter(MPU6050_HIGHPASS_0_63_HZ); mpu.setMotionDetectionThreshold(2); mpu.setMotionDetectionDuration(20); mpu.setInterruptPinLatch(true); mpu.setInterruptPinPolarity(true); mpu.setMotionInterrupt(true); } checkWakeupReason(); }
+void loop() { if (digitalRead(DEADMAN_PIN) == LOW) { triggerAlarm("CABLE CUT"); } if (Serial2.available()) { char cmd = Serial2.read(); if (cmd == 'U') unlockBike(); if (cmd == 'L') lockBike(); if (cmd == 'S') goToSleep(); } delay(50); }
+void lockBike() { sensors_event_t a, g, temp; mpu.getEvent(&a, &g, &temp); float motion = abs(a.acceleration.x) + abs(a.acceleration.y); if (motion > MOTION_THRESHOLD) { Serial.println("Lock Aborted!"); Serial2.print('M'); return; } Serial.println("Locking..."); digitalWrite(AIN1, LOW); digitalWrite(AIN2, HIGH); analogWrite(PWMA, 255); unsigned long startTime = millis(); while (digitalRead(SW_LOCK) == HIGH) { if (millis() - startTime > 4000) break; } stopMotor(); Serial2.print('K'); delay(1000); goToSleep(); }
+void unlockBike() { Serial.println("Unlocking..."); digitalWrite(AIN1, HIGH); digitalWrite(AIN2, LOW); analogWrite(PWMA, 255); unsigned long startTime = millis(); while (digitalRead(SW_UNLOCK) == HIGH) { if (millis() - startTime > 4000) break; } stopMotor(); Serial2.print('O'); }
+void stopMotor() { digitalWrite(AIN1, LOW); digitalWrite(AIN2, LOW); analogWrite(PWMA, 0); }
+void triggerAlarm(String reason) { Serial.println("ALARM: " + reason); Serial2.print('A'); for (int i = 0; i < 30; i++) { digitalWrite(SIREN_PIN, HIGH); delay(500); digitalWrite(SIREN_PIN, LOW); delay(500); } }
+void goToSleep() { esp_sleep_enable_ext0_wakeup((gpio_num_t)WAKE_BTN, 1); esp_sleep_enable_ext1_wakeup(1ULL << DEADMAN_PIN, ESP_EXT1_WAKEUP_ALL_LOW); delay(500); esp_deep_sleep_start(); }
+void checkWakeupReason() { esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause(); if (wakeup_reason == ESP_SLEEP_WAKEUP_EXT1) triggerAlarm("CABLE CUT WHILE ASLEEP"); }`
+            },
+            'nano': {
+                title: 'Arduino Nano (Handlebar UI)',
+                desc: 'User-facing slave controller. Manages PN532 NFC reader, RGB LED, and sends commands via Cat5e.',
+                code: `#include <Wire.h>
+#include <Adafruit_PN532.h>
+#include <SoftwareSerial.h>
+#define PN532_IRQ (2)
+#define PN532_RESET (3)
+Adafruit_PN532 nfc(PN532_IRQ, PN532_RESET);
+#define LED_R 9
+#define LED_G 10
+#define LED_B 11
+#define BTN_PIN 2
+SoftwareSerial espSerial(4, 5);
+uint8_t authorizedUID[] = { 0x04, 0x12, 0x34, 0x56, 0x78, 0x90, 0x12 };
+uint8_t uidLength = 7;
+bool isLocked = true; unsigned long lastDebounceTime = 0; bool lastButtonState = HIGH;
+void setup() { Serial.begin(115200); espSerial.begin(9600); pinMode(LED_R, OUTPUT); pinMode(LED_G, OUTPUT); pinMode(LED_B, OUTPUT); pinMode(BTN_PIN, INPUT_PULLUP); nfc.begin(); uint32_t versiondata = nfc.getFirmwareVersion(); if (!versiondata) while(1); nfc.SAMConfig(); setLED(255, 0, 0); }
+void loop() { checkButton(); checkNFC(); listenToESP32(); }
+void checkButton() { bool reading = digitalRead(BTN_PIN); if (reading != lastButtonState) lastDebounceTime = millis(); if ((millis() - lastDebounceTime) > 50) { if (reading == LOW && !isLocked) { espSerial.print('L'); setLED(255, 255, 0); delay(1000); } } lastButtonState = reading; }
+void checkNFC() { if (!isLocked) return; uint8_t uid[] = {0,0,0,0,0,0,0}; uint8_t uidLen; if (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLen, 50)) { bool match = true; for (uint8_t i = 0; i < uidLen; i++) if (uid[i] != authorizedUID[i]) match = false; if (match) { espSerial.print('U'); setLED(0, 0, 255); delay(2000); } else { blinkLED(255, 0, 0, 3); } } }
+void listenToESP32() { if (espSerial.available()) { char status = espSerial.read(); if (status == 'M') { blinkLED(255, 100, 0, 5); setLED(0, 255, 0); } else if (status == 'K') { isLocked = true; setLED(255, 0, 0); } else if (status == 'O') { isLocked = false; setLED(0, 255, 0); } else if (status == 'A') { while(true) { setLED(255, 0, 0); delay(100); setLED(0, 0, 255); delay(100); } } } }
+void setLED(int r, int g, int b) { analogWrite(LED_R, r); analogWrite(LED_G, g); analogWrite(LED_B, b); }
+void blinkLED(int r, int g, int b, int times) { for (int i = 0; i < times; i++) { setLED(r, g, b); delay(150); setLED(0, 0, 0); delay(150); } }`
+            },
+            'mpu6050': {
+                title: 'MPU6050 Accelerometer',
+                desc: '6-axis motion tracking. Serves as Motion Lockout (>2.0G) and Tamper Sensor (>2.5G).', code: null
+            },
+            'motor': {
+                title: 'JGY370 Worm Gear & Switches',
+                desc: '12V DC motor with limit switches. Cannot be back-driven.', code: null
+            },
+            'driver': {
+                title: 'TB6612FNG Motor Driver',
+                desc: 'H-bridge motor driver. Switches 12V power based on 3.3V logic.', code: null
+            },
+            'power': {
+                title: 'Power Sled',
+                desc: '18650 Cell + TP4056 + 12V/5V MT3608 Boost Converters.', code: null
+            },
+            'btn': {
+                title: 'Waterproof Lock Button',
+                desc: 'Initiates locking sequence and wakes ESP32 from deep sleep.', code: null
+            },
+            'nfc': {
+                title: 'PN532 NFC Module',
+                desc: 'Authenticates MIFARE tags to unlock the system securely.', code: null
+            },
+            'siren': {
+                title: '110dB Siren & MOSFET',
+                desc: 'Active alarm triggered via IRLZ44N MOSFET when tamper detected.', code: null
+            },
+            'harness': {
+                title: 'Cat5e Dead-Man Loop',
+                desc: 'Transmits power/data and monitors connection integrity.', code: null
+            },
+            'led': {
+                title: 'RGB Indicator',
+                desc: 'Visual feedback (Red=Armed, Green=Open, Blue=NFC, Yellow=Error).', code: null
+            }
+        };
+
+        // DOM Elements
+        const btnUnlock = document.getElementById('btn-unlock'); 
+        const btnLock = document.getElementById('btn-lock'); 
+        const btnCut = document.getElementById('btn-cut');
+        const btnReset = document.getElementById('btn-reset');
+        const sliderAccel = document.getElementById('accel-slider');
+        const valAccel = document.getElementById('g-force-val');
+        const terminal = document.getElementById('terminal');
+        const statusInd = document.getElementById('status-indicator');
+        const vaultBox = document.getElementById('vault-box');
+        
+        const infoDefault = document.getElementById('info-default');
+        const infoContent = document.getElementById('info-content');
+        const infoTitle = document.getElementById('info-title');
+        const infoDesc = document.getElementById('info-desc');
+        const infoCodeContainer = document.getElementById('info-code-container');
+        const infoCode = document.getElementById('info-code');
+
+        // SVG Interactive Parts
+        const led = document.getElementById('ui-led');
+        const physicalBtnSvg = document.getElementById('physical-btn-svg');
+        const motorShaft = document.getElementById('motor-shaft');
+        const sirenRings = document.getElementById('siren-rings');
+        const lblAlarm = document.getElementById('lbl-alarm');
+        const leverLock = document.getElementById('lever-lock');
+        const rollerLock = document.getElementById('roller-lock');
+        const leverUnlock = document.getElementById('lever-unlock');
+        const rollerUnlock = document.getElementById('roller-unlock');
+
+        // State Variables
+        let isLocked = true;
+        let isAnimating = false;
+        let isAlarm = false;
+        let accelValue = 1.0;
+
+        // Logging & Display
+        function log(msg, type = 'info') {
+            const div = document.createElement('div');
+            const time = new Date().toISOString().substring(11, 19);
+            div.textContent = `[${time}] > ${msg}`;
+            if (type === 'error') div.className = 'text-red-400 font-bold';
+            else if (type === 'warn') div.className = 'text-yellow-400 font-bold';
+            else if (type === 'success') div.className = 'text-blue-300';
+            else div.className = 'text-green-400';
+            terminal.appendChild(div);
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        function updateStatus(text, bg, textCol, border) {
+            statusInd.textContent = text;
+            statusInd.className = `px-4 py-2 rounded text-sm font-bold shadow-sm transition-colors duration-300 tracking-wider border text-center w-full ${bg} ${textCol} ${border}`;
+        }
+
+        // Basic Syntax Highlighter
+        function highlightSyntax(str) {
+            // Encode HTML entities first
+            str = str.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            // Highlight Includes separately
+            str = str.replace(/(#include &lt;.*?&gt;)/g, '<span class="token-include">$1</span>');
+            return str
+                .replace(/(\/\/.*)/g, '<span class="token-comment">$1</span>')
+                .replace(/\b(void|int|char|uint8_t|bool|float|String|unsigned|long|if|else|while|for|return|define)\b/g, '<span class="token-keyword">$1</span>')
+                .replace(/\b(Serial|Serial2|nfc|Wire|esp_sleep_enable_ext0_wakeup|esp_sleep_enable_ext1_wakeup|esp_deep_sleep_start|pinMode|digitalRead|digitalWrite|analogWrite|delay|millis|begin|print|println|abs|setup|loop|readPassiveTargetID|SAMConfig|getFirmwareVersion|setHighPassFilter|setMotionDetectionThreshold|setMotionDetectionDuration|setInterruptPinLatch|setInterruptPinPolarity|setMotionInterrupt|getEvent|esp_sleep_get_wakeup_cause|read|available)\b/g, '<span class="token-function">$1</span>')
+                .replace(/\b([0-9]+(\.[0-9]+)?(ULL)?)\b/g, '<span class="token-number">$1</span>')
+                .replace(/('.*?'|".*?")/g, '<span class="token-string">$1</span>');
+        }
+
+        // Info Panel click routing
+        window.showInfo = function(compId) {
+            const data = componentData[compId];
+            if(!data) return;
+
+            infoDefault.classList.add('hidden');
+            infoContent.classList.remove('hidden');
+            infoContent.classList.add('flex');
+            
+            infoTitle.textContent = data.title;
+            infoDesc.textContent = data.desc;
+
+            if (data.code) {
+                infoCodeContainer.classList.remove('hidden');
+                infoCodeContainer.classList.add('flex');
+                infoCode.innerHTML = highlightSyntax(data.code);
+            } else {
+                infoCodeContainer.classList.add('hidden');
+                infoCodeContainer.classList.remove('flex');
+            }
+        };
+
+        // --- Logic Handlers ---
+
+        sliderAccel.addEventListener('input', (e) => {
+            accelValue = parseFloat(e.target.value);
+            
+            if (accelValue <= 2.0) {
+                valAccel.textContent = accelValue.toFixed(1) + ' G (Idle)';
+                valAccel.className = 'font-mono text-xs font-bold px-2 py-0.5 rounded text-slate-700 bg-slate-200';
+            } else if (accelValue > 2.0 && accelValue < 2.5) {
+                valAccel.textContent = accelValue.toFixed(1) + ' G (Motion)';
+                valAccel.className = 'font-mono text-xs font-bold px-2 py-0.5 rounded text-yellow-800 bg-yellow-200';
+            } else if (accelValue >= 2.5) {
+                valAccel.textContent = accelValue.toFixed(1) + ' G (Tamper)';
+                valAccel.className = 'font-mono text-xs font-bold px-2 py-0.5 rounded text-red-800 bg-red-200';
+                if (isLocked && !isAlarm) {
+                    triggerAlarm(`SHOCK THRESHOLD EXCEEDED (${accelValue.toFixed(1)}G)`);
+                }
+            }
+        });
+
+        function triggerAlarm(reason) {
+            if(isAlarm) return;
+            isAlarm = true;
+            log(`CRITICAL: ${reason}`, 'error');
+            log(`VAULT: Triggering 110dB Siren!`, 'error');
+            
+            updateStatus("ALARM ACTIVE", "bg-red-600", "text-white animate-pulse", "border-red-800");
+            vaultBox.classList.add('alarm-bg');
+            sirenRings.classList.add('siren-active');
+            lblAlarm.style.opacity = '1';
+            
+            btnUnlock.disabled = true; btnLock.disabled = true;
+            btnUnlock.classList.add('opacity-50', 'cursor-not-allowed');
+            btnLock.classList.add('opacity-50', 'cursor-not-allowed');
+            
+            btnCut.classList.add('hidden');
+            btnReset.classList.remove('hidden');
+        }
+
+        btnCut.addEventListener('click', () => {
+            // Apply cut styling to SVG deadman wires
+            ['h-dm1', 'h-dm2', 'w-dm-esp-out', 'w-dm-esp-in'].forEach(id => {
+                document.getElementById(id).classList.add('deadman-cut');
+            });
+            document.getElementById('w-dm-loop').style.opacity = '0';
+
+            if (isLocked) {
+                triggerAlarm("DEAD-MAN LOOP SEVERED (D14 LOW)");
+            } else {
+                log("WARNING: Cable cut, but system is unlocked.", "warn");
+                btnCut.classList.add('hidden');
+                btnReset.classList.remove('hidden');
+            }
+        });
+
+        btnUnlock.addEventListener('click', () => {
+            if (isAnimating || !isLocked || isAlarm) return;
+            isAnimating = true;
+            
+            log("UI: Valid NFC Tag scanned (PN532).", 'info');
+            updateStatus("AUTHENTICATING...", "bg-blue-100", "text-blue-700", "border-blue-300");
+            led.setAttribute('fill', '#3b82f6'); // Blue
+            
+            setTimeout(() => {
+                log("VAULT: Unlocking. Motor reverse.", 'success');
+                updateStatus("MOTOR REVERSE", "bg-green-100", "text-green-700", "border-green-300");
+                motorShaft.className.baseVal = 'motor-rev';
+
+                setTimeout(() => {
+                    log("VAULT: Unlock Limit Hit. Stop.");
+                    leverUnlock.setAttribute('d', 'M 5 5 L 45 5');
+                    rollerUnlock.setAttribute('cy', '5');
+                    motorShaft.className.baseVal = '';
+
+                    setTimeout(() => {
+                        log("UI: Unlock complete.", 'success');
+                        updateStatus("UNLOCKED", "bg-green-100", "text-green-700", "border-green-400");
+                        led.setAttribute('fill', '#10b981'); // Green
+                        isLocked = false;
+                        isAnimating = false;
+                    }, 500);
+                }, 1500); 
+            }, 800);
+        });
+
+        btnLock.addEventListener('click', () => {
+            if (isAnimating || isLocked || isAlarm) return;
+            
+            // Motion Lockout Check (Requirement #4)
+            if (accelValue > 2.0) {
+                log(`SAFETY LOCKOUT: Lock Aborted! Motion > 2.0G (${accelValue}G)`, 'warn');
+                updateStatus("MOTION DETECTED - LOCKOUT", "bg-yellow-100", "text-yellow-700", "border-yellow-500");
+                led.setAttribute('fill', '#eab308');
+                statusInd.parentElement.classList.add('shake-warning');
+                setTimeout(() => {
+                    statusInd.parentElement.classList.remove('shake-warning');
+                    updateStatus("UNLOCKED", "bg-green-100", "text-green-700", "border-green-400");
+                    led.setAttribute('fill', '#10b981');
+                }, 2000);
+                return;
+            }
+
+            isAnimating = true;
+            log("UI: Physical lock button pressed.", 'info');
+            physicalBtnSvg.setAttribute('r', '10'); 
+            setTimeout(() => physicalBtnSvg.setAttribute('r', '12'), 150);
+            
+            updateStatus("WAKING VAULT...", "bg-orange-100", "text-orange-700", "border-orange-300");
+            led.setAttribute('fill', '#f59e0b'); 
+            
+            setTimeout(() => {
+                log("VAULT: ESP32 Awake. Locking.", 'info');
+                updateStatus("LOCKING...", "bg-orange-100", "text-orange-700", "border-orange-300");
+                motorShaft.className.baseVal = 'motor-fwd';
+
+                setTimeout(() => {
+                    log("VAULT: Lock Limit Hit. Secure.");
+                    leverLock.setAttribute('d', 'M 5 5 L 45 5');
+                    rollerLock.setAttribute('cy', '5');
+                    motorShaft.className.baseVal = '';
+
+                    setTimeout(() => {
+                        log("UI: Lock complete. Armed.", 'warn');
+                        updateStatus("LOCKED & ARMED", "bg-slate-800", "text-white", "border-slate-900");
+                        led.setAttribute('fill', '#ef4444'); // Red
+                        
+                        leverUnlock.setAttribute('d', 'M 5 5 L 45 -5');
+                        rollerUnlock.setAttribute('cy', '-5');
+                        isLocked = true;
+                        isAnimating = false;
+                    }, 500);
+                }, 1500); 
+            }, 600);
+        });
+
+        btnReset.addEventListener('click', () => {
+            isAlarm = false;
+            sliderAccel.value = 1.0;
+            accelValue = 1.0;
+            valAccel.textContent = '1.0 G (Idle)';
+            valAccel.className = 'font-mono text-xs font-bold px-2 py-0.5 rounded text-slate-700 bg-slate-200';
+            
+            ['h-dm1', 'h-dm2', 'w-dm-esp-out', 'w-dm-esp-in'].forEach(id => {
+                document.getElementById(id).classList.remove('deadman-cut');
+            });
+            document.getElementById('w-dm-loop').style.opacity = '1';
+            
+            vaultBox.classList.remove('alarm-bg');
+            sirenRings.classList.remove('siren-active');
+            lblAlarm.style.opacity = '0';
+            
+            btnUnlock.disabled = false; btnLock.disabled = false;
+            btnUnlock.classList.remove('opacity-50', 'cursor-not-allowed');
+            btnLock.classList.remove('opacity-50', 'cursor-not-allowed');
+            
+            btnReset.classList.add('hidden');
+            btnCut.classList.remove('hidden');
+            
+            log("SYSTEM REBOOT: Fault cleared.", 'info');
+            
+            if(isLocked) {
+                updateStatus("LOCKED & ARMED", "bg-slate-800", "text-white", "border-slate-900");
+            } else {
+                updateStatus("UNLOCKED", "bg-green-100", "text-green-700", "border-green-400");
+            }
+        });
+
+        // Init visuals
+        setTimeout(() => {
+            leverLock.setAttribute('d', 'M 5 5 L 45 5');
+            rollerLock.setAttribute('cy', '5');
+            led.setAttribute('fill', '#ef4444');
+        }, 200);
+    </script>
+</body>
+</html>
